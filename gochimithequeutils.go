@@ -133,6 +133,7 @@ var (
 	oneGroupMolRe string
 )
 
+// ByLength is a string slice sorter.
 type ByLength []string
 
 func (s ByLength) Len() int {
@@ -221,13 +222,39 @@ func LinearToEmpiricalFormula(txt *C.char) *C.char {
 		f = nf
 	}
 
-	// Here nf is a sequence of atoms
-	// We just need to count them
-	for k, v := range basicAtomCount(nf) {
-		if v == 1 {
-			ef = ef + fmt.Sprintf("%s", k)
+	// Counting the atoms
+	bAc := basicAtomCount(nf)
+
+	// Sorting the atoms
+	// C, H and then in alphabetical order
+	var ats []string // atoms
+	hasC := false    // C atom present
+	hasH := false    // H atom present
+
+	for k, _ := range bAc {
+		if k == "C" {
+			hasC = true
+		} else if k == "H" {
+			hasH = true
 		} else {
-			ef = ef + fmt.Sprintf("%s%d", k, v)
+			ats = append(ats, k)
+		}
+	}
+	sort.Strings(ats)
+
+	if hasH {
+		ats = append([]string{"H"}, ats...)
+	}
+	if hasC {
+		ats = append([]string{"C"}, ats...)
+	}
+
+	for _, at := range ats {
+		nb := bAc[at]
+		if nb == 1 {
+			ef = ef + fmt.Sprintf("%s", at)
+		} else {
+			ef = ef + fmt.Sprintf("%s%d", at, nb)
 		}
 	}
 
