@@ -1,9 +1,7 @@
-package main
-
-// go build -buildmode=c-shared -o gochimithequeutils.so gochimithequeutils.go
+// Package chimitheque provides useful chemistry related utilities.
+package chimitheque
 
 import (
-	"C"
 	"bytes"
 	"fmt"
 	"regexp"
@@ -126,25 +124,22 @@ var (
 		"Md": "mendelevium",
 		"No": "nobelium",
 		"Lr": "lawrencium",
-		"D":  "deuterium"}
+		"D":  "deuterium",
+	}
+
 	// basic molecule regex (atoms and numbers only)
-	basicMolRe string
+	basicMolRe *regexp.Regexp
+
 	// (AYZ)n molecule like regex
-	oneGroupMolRe string
+	oneGroupMolRe *regexp.Regexp
 )
 
-// ByLength is a string slice sorter.
-type ByLength []string
+// atomByLength is a string slice sorter.
+type atomByLength []string
 
-func (s ByLength) Len() int {
-	return len(s)
-}
-func (s ByLength) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-func (s ByLength) Less(i, j int) bool {
-	return len(s[i]) > len(s[j])
-}
+func (s atomByLength) Len() int           { return len(s) }
+func (s atomByLength) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s atomByLength) Less(i, j int) bool { return len(s[i]) > len(s[j]) }
 
 func init() {
 	sortedAtoms := make([]string, 0, len(atoms))
@@ -153,55 +148,50 @@ func init() {
 	}
 	// the atom must be sorted by decreasing size
 	// to match first Cl before C for example
-	sort.Sort(ByLength(sortedAtoms))
+	sort.Sort(atomByLength(sortedAtoms))
 
 	// building the basic molecule regex
 	// (atom1|atom2|...)([1-9]*)
-	var buffer bytes.Buffer
-	buffer.WriteString("(")
+	var buf bytes.Buffer
+	buf.WriteString("(")
 	for _, a := range sortedAtoms {
-		buffer.WriteString(a)
-		buffer.WriteString("|")
+		buf.WriteString(a)
+		buf.WriteString("|")
 	}
 	// removing the last |
-	buffer.Truncate(buffer.Len() - 1)
-	buffer.WriteString(")")
-	buffer.WriteString("([1-9]+)*")
-	basicMolRe = buffer.String()
+	buf.Truncate(buf.Len() - 1)
+	buf.WriteString(")")
+	buf.WriteString("([1-9]+)*")
+	basicMolRe = regexp.MustCompilePOSIX(buf.String())
 
 	// building the one group molecule regex
-	buffer.Reset()
-	buffer.WriteString("(?:\\(|\\[)")
-	buffer.WriteString("((?:[")
+	buf.Reset()
+	buf.WriteString("(?:\\(|\\[)")
+	buf.WriteString("((?:[")
 	for _, a := range sortedAtoms {
-		buffer.WriteString(a)
-		buffer.WriteString("|")
+		buf.WriteString(a)
+		buf.WriteString("|")
 	}
 	// removing the last |
-	buffer.Truncate(buffer.Len() - 1)
-	buffer.WriteString("]+[1-9]*)+)")
-	buffer.WriteString("(?:\\)|\\])")
-	buffer.WriteString("([1-9]*)")
-	oneGroupMolRe = buffer.String()
+	buf.Truncate(buf.Len() - 1)
+	buf.WriteString("]+[1-9]*)+)")
+	buf.WriteString("(?:\\)|\\])")
+	buf.WriteString("([1-9]*)")
+
+	oneGroupMolRe = regexp.MustCompile(buf.String())
 }
 
 // LinearToEmpiricalFormula returns the empirical formula from the linear formula f.
-// Method exported to Python.
 // example: [(CH3)2SiH]2NH
 //          (CH3)2C[C6H2(Br)2OH]2
-//export LinearToEmpiricalFormula
-func LinearToEmpiricalFormula(txt *C.char) *C.char {
-
-	// Convert C types to Go types
-	f := C.GoString(txt)
-
+func LinearToEmpiricalFormula(f string) string {
 	var ef string
 
 	s := "-"
 	nf := ""
 
 	// Finding the first (XYZ)n match
-	reg := regexp.MustCompile(oneGroupMolRe)
+	reg := oneGroupMolRe
 
 	for s != "" {
 		s = reg.FindString(f)
@@ -210,10 +200,9 @@ func LinearToEmpiricalFormula(txt *C.char) *C.char {
 		m := oneGroupAtomCount(s)
 		ms := "" // molecule string
 		for k, v := range m {
-			if v == 1 {
-				ms = fmt.Sprintf("%s%s", ms, k)
-			} else {
-				ms = fmt.Sprintf("%s%s%d", ms, k, v)
+			ms += k
+			if v != 1 {
+				ms += fmt.Sprintf("%d", v)
 			}
 		}
 
@@ -232,11 +221,12 @@ func LinearToEmpiricalFormula(txt *C.char) *C.char {
 	hasH := false    // H atom present
 
 	for k, _ := range bAc {
-		if k == "C" {
+		switch k {
+		case "C":
 			hasC = true
-		} else if k == "H" {
+		case "H":
 			hasH = true
-		} else {
+		default:
 			ats = append(ats, k)
 		}
 	}
@@ -250,15 +240,14 @@ func LinearToEmpiricalFormula(txt *C.char) *C.char {
 	}
 
 	for _, at := range ats {
+		ef += at
 		nb := bAc[at]
-		if nb == 1 {
-			ef = ef + fmt.Sprintf("%s", at)
-		} else {
-			ef = ef + fmt.Sprintf("%s%d", at, nb)
+		if nb != 1 {
+			ef += fmt.Sprintf("%d", nb)
 		}
 	}
 
-	return C.CString(ef)
+	return ef
 }
 
 // oneGroupAtomCount returns a count of the atoms of the f formula as a map.
@@ -270,15 +259,10 @@ func LinearToEmpiricalFormula(txt *C.char) *C.char {
 func oneGroupAtomCount(f string) map[string]int {
 	var (
 		// the result map
-		c   = make(map[string]int)
-		r   *regexp.Regexp
-		err error
+		c = make(map[string]int)
+		r = oneGroupMolRe
 	)
 	// Looking for non matching molecules.
-	if r, err = regexp.Compile(oneGroupMolRe); err != nil {
-		fmt.Println("error compiling regex:" + oneGroupMolRe)
-		return nil
-	}
 	if !r.MatchString(f) {
 		return nil
 	}
@@ -312,14 +296,10 @@ func basicAtomCount(f string) map[string]int {
 	var (
 		// the result map
 		c   = make(map[string]int)
-		r   *regexp.Regexp
+		r   = basicMolRe
 		err error
 	)
 	// Looking for non matching molecules.
-	if r, err = regexp.CompilePOSIX(basicMolRe); err != nil {
-		fmt.Println("error compiling regex:" + basicMolRe)
-		return nil
-	}
 	if !r.MatchString(f) {
 		return nil
 	}
@@ -348,7 +328,4 @@ func basicAtomCount(f string) map[string]int {
 		}
 	}
 	return c
-}
-
-func main() {
 }
